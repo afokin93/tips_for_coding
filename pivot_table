@@ -1,4 +1,5 @@
--- consulta comum --> cust_id fica implícito ou repetido pra todas as linhas
+
+-- common look --> cust_id is not explicit or repeats itself several times
 select
   cus_cust_id_sel,
   bid_month_win,
@@ -12,7 +13,7 @@ group by 1,2;
 
 
 
--- add totais das colunas (no pivot acima)
+-- pivot table look --> three variables in one view
 SELECT
   *
 FROM

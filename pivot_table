@@ -1,0 +1,63 @@
+-- consulta comum --> cust_id fica implícito ou repetido pra todas as linhas
+select
+  cus_cust_id_sel,
+  bid_month_win,
+  sum(gmv_usd) gmv
+from SCORING.fraud_main
+where cus_cust_id_sel in (746778082,130414602,241201322,315333870)
+  and bid_month_win in (202201,202202,202203,202204,202205)
+group by 1,2;
+
+--> result: 20 rows x 3 columns = 60 celds
+
+
+
+-- add totais das colunas (no pivot acima)
+SELECT
+  *
+FROM
+  (  
+  select
+    bid_month_win,
+    cus_cust_id_sel,
+    sum(gmv_usd) as gmv
+  from SCORING.fraud_main
+  where cus_cust_id_sel in (746778082,130414602,241201322,315333870)
+  group by 1,2
+  ) as tab1
+PIVOT
+  (
+  sum(gmv)
+  for bid_month_win in (202201,202202,202203,202204,202205)
+  ) as tab2
+ORDER BY 1;
+
+--> result: 4 rows x 6 columns = 24 celds
+
+
+
+-- adding column total (from pivot above)
+SELECT
+  *
+FROM
+  (  
+  select
+    bid_month_win,
+    coalesce(cus_cust_id_sel,'Total month') as cust_id,
+    sum(gmv_usd) as gmv
+  from SCORING.fraud_main
+  where cus_cust_id_sel in (746778082,130414602,241201322,315333870)
+  group by grouping sets ((cus_cust_id_sel,bid_month_win),(bid_month_win))
+  ) as tab1
+PIVOT
+  (
+  sum(gmv)
+  for bid_month_win in (202201,202202,202203,202204,202205)
+  ) as tab2
+ORDER BY 1;
+
+--> result: 5 rows x 6 columns = 30 celds [with more info]
+
+
+
+

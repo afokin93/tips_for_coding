@@ -1,0 +1,298 @@
+
+-- table calendario
+drop table if exists `meli-bi-data.SBOX_PF_MKT.calendario`;
+CREATE TABLE `meli-bi-data.SBOX_PF_MKT.calendario`
+OPTIONS(
+  expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+) AS
+  select
+    calendar_date
+  from `meli-bi-data.WHOWNER.SYS_CALENDAR`
+  where calendar_date between current_date - 90 and current_date - 1;
+
+
+--- infos importantes dos casos de MB
+drop table if exists `meli-bi-data.SBOX_PF_MKT.casos_rm`;
+CREATE TABLE `meli-bi-data.SBOX_PF_MKT.casos_rm`
+OPTIONS(
+  expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+) AS
+  SELECT distinct
+    tab.data_fchmto_caso,
+    tab.site_id,
+    tab.cust_id,
+    tab.case_id,
+    tab.sec_subtype,
+    first_value(tab.restr) over (partition by tab.case_id order by tab.case_id desc) restr,
+    tab.action_type,
+    tab.resolution,
+    tab.comentario
+  FROM
+    (
+    select distinct
+      cast(b.date_created as date) data_fchmto_caso,
+      b.sit_site_id site_id,
+      a.gca_cust_id cust_id,
+      a.gca_id case_id,
+      a.gca_second_subtype sec_subtype,
+      first_value(c.reason_id) over (partition by c.cust_id order by b.date_created) restr,
+      b.action_type,
+      b.resolution,
+      a.gca_comment_cases comentario
+    from `meli-bi-data.WHOWNER.BT_GENERAL_CASES_MANUALREW_EXP` a
+    left join `meli-bi-data.WHOWNER.BT_ACTION_MR` b
+      on a.gca_id = b.case_id
+    left join `meli-bi-data.WHOWNER.BT_MPR_CUST_RESTRICTION` c
+      on cast(a.gca_cust_id as numeric) = cast(c.cust_id as numeric)
+    where a.gca_subtype = 'fraud_seller_user_bof'
+      and cast(b.date_created as date) >= current_date - 90
+    ) tab
+  WHERE tab.sec_subtype is not null
+    AND tab.action_type = 'close_case';
+
+
+-- cálculo das eficiências do dia
+drop table if exists `meli-bi-data.SBOX_PF_MKT.casos_efic_dia`;
+CREATE TABLE `meli-bi-data.SBOX_PF_MKT.casos_efic_dia`
+OPTIONS(
+  expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+) AS
+  select
+    a.calendar_date,
+    sum(case when b.resolution = 'Deactive' then 1 else 0 end) inabs_total,
+    coalesce(xxx.inabs_bpe,0) inabs_bpe,
+    sum(case when b.resolution = 'Deactive' and b.sec_subtype like '%picovtas%' then 1 else 0 end) inabs_picovtas,
+    sum(case when b.resolution = 'Deactive' and b.sec_subtype like '%bof_variation%' then 1 else 0 end) inabs_bof_var,
+    sum(case when b.resolution = 'Deactive' and b.sec_subtype like '%pico-gmv%' then 1 else 0 end) inabs_pico_gmv,
+    sum(case when b.resolution = 'Deactive' and b.sec_subtype like '%pnr-can-orders-pre-shipped-skipped-seller%' then 1 else 0 end) inabs_pnr_pre_shipped,
+    sum(case when b.resolution = 'Deactive' and b.sec_subtype like '%pnr-big-seller%' then 1 else 0 end) inabs_pnr,
+    sum(case when b.resolution = 'Deactive' and b.sec_subtype like '%can-big-seller%' then 1 else 0 end) inabs_can,
+    sum(case when b.resolution = 'Deactive' and b.sec_subtype like '%skipped%' then 1 else 0 end) inabs_skipped,
+    sum(case when b.resolution = 'Deactive' and b.sec_subtype like '%seller_cx%' then 1 else 0 end) inabs_seller_cx,
+    sum(case when b.resolution = 'Deactive' and b.sec_subtype like '%REFUND_CANCELLATIONS%' then 1 else 0 end) inabs_ref_can_cx,
+    sum(case when b.resolution = 'Deactive' and b.sec_subtype like '%micro_bof%' then 1 else 0 end) inabs_micro_bof,
+    sum(case when b.resolution = 'Deactive' and b.sec_subtype like '%marca_bof%' then 1 else 0 end) inabs_marca_bof,
+    yyy.bofs_confirmados,
+
+    count(b.case_id) qtdd_total,
+    sum(case when b.sec_subtype like '%bof_pico%' then 1 else 0 end) qtdd_bpe,
+    sum(case when b.sec_subtype like '%picovtas%' then 1 else 0 end) qtdd_picovtas,
+    sum(case when b.sec_subtype like '%bof_variation%' then 1 else 0 end) qtdd_bof_var,
+    sum(case when b.sec_subtype like '%pico-gmv%' then 1 else 0 end) qtdd_pico_gmv,
+    sum(case when b.sec_subtype like '%pnr-can-orders-pre-shipped-skipped-seller%' then 1 else 0 end) qtdd_pnr_pre_shipped,
+    sum(case when b.sec_subtype like '%pnr-big-seller%' then 1 else 0 end) qtdd_pnr,
+    sum(case when b.sec_subtype like '%can-big-seller%' then 1 else 0 end) qtdd_can,
+    sum(case when b.sec_subtype like '%skipped%' then 1 else 0 end) qtdd_skipped,
+    sum(case when b.sec_subtype like '%seller_cx%' then 1 else 0 end) qtdd_seller_cx,
+    sum(case when b.sec_subtype like '%REFUND_CANCELLATIONS%' then 1 else 0 end) qtdd_ref_can_cx,
+    sum(case when b.sec_subtype like '%micro_bof%' then 1 else 0 end) qtdd_micro_bof,
+    sum(case when b.sec_subtype like '%marca_bof%' then 1 else 0 end) qtdd_marca_bof,
+    yyy.amenazas_de_bof
+
+  from `meli-bi-data.SBOX_PF_MKT.calendario` a
+  left join `meli-bi-data.SBOX_PF_MKT.casos_rm` b
+    on a.calendar_date = b.data_fchmto_caso
+  left join
+    (select
+      data_fchmto_caso,
+      sum(case when res_atual <> '-' and sec_subtype like '%bof_pico%' then 1 else 0 end) inabs_bpe
+    from 
+      (
+        select
+          aa.cust_id,
+          aa.sec_subtype,
+          aa.data_fchmto_caso,
+          concat(max(case when orden = 1 then tab.reason_id else '-' end), 
+                 max(case when orden = 2 then concat(' + ' , tab.reason_id) else '' end),
+                 max(case when orden = 3 then concat(' + ' , tab.reason_id) else '' end),
+                 max(case when orden = 4 then concat(' + ' , tab.reason_id) else '' end),
+                 max(case when orden = 5 then concat(' + ' , tab.reason_id) else '' end),
+                 max(case when orden = 6 then concat(' + ' , tab.reason_id) else '' end),
+                 max(case when orden = 7 then concat(' + ' , tab.reason_id) else '' end),
+                 max(case when orden = 8 then concat(' + ' , tab.reason_id) else '' end),
+                 max(case when orden = 9 then concat(' + ' , tab.reason_id) else '' end)) res_atual
+        from `meli-bi-data.SBOX_PF_MKT.casos_rm` aa
+        left join
+          (
+          select
+            a.cust_id,
+            b.reason_id,
+            b.creation_date,
+            dense_rank() over (partition by a.cust_id order by b.creation_date, b.reason_id) as orden
+          from `meli-bi-data.SBOX_PF_MKT.casos_rm` a
+          left join `meli-bi-data.WHOWNER.BT_MPR_CUST_RESTRICTION` b
+            on cast(a.cust_id as int) = cast(b.cust_id as int)
+          where b.status = 'P'
+          ) tab
+            on aa.cust_id = tab.cust_id
+        group by 1,2,3
+        )
+    group by 1) xxx
+      on a.calendar_date = xxx.data_fchmto_caso
+  left join
+    (
+    select
+      a.insert_date,
+      count(distinct a.cust_id) amenazas_de_bof,
+      count(distinct b.cust_id) bofs_confirmados,
+    from `meli-bi-data.SBOX_PF_MKT.marca_bof_amenaza` a
+    left join `meli-bi-data.SBOX_PF_MKT.marca_bof_confirmado_15d` b
+        on a.insert_date = b.insert_date - 15
+    group by 1
+    ) yyy
+    on a.calendar_date = yyy.insert_date
+  group by 1,3,14,27;
+
+
+-- base geral de dados
+drop table if exists `meli-bi-data.SBOX_PF_MKT.base`;
+CREATE TABLE `meli-bi-data.SBOX_PF_MKT.base`
+OPTIONS(
+  expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+) AS
+  select
+    calendar_date,
+    coalesce(inabs_total,0) inabs_total,
+    coalesce(inabs_bpe,0) inabs_bpe,
+    coalesce(inabs_picovtas,0) inabs_picovtas,
+    coalesce(inabs_bof_var,0) inabs_bof_var,
+    coalesce(inabs_pico_gmv,0) inabs_bof_var,
+    coalesce(inabs_pnr_pre_shipped,0) inabs_pnr_pre_shipped,
+    coalesce(inabs_pnr,0) inabs_pnr,
+    coalesce(inabs_can,0) inabs_can,
+    coalesce(inabs_skipped,0) inabs_skipped,
+    coalesce(inabs_seller_cx,0) inabs_seller_cx,
+    coalesce(inabs_ref_can_cx,0) inabs_ref_can_cx,
+    coalesce(inabs_micro_bof,0) inabs_micro_bof,
+    coalesce(inabs_marca_bof,0) inabs_marca_bof,
+    coalesce(bofs_confirmados,0) bofs_confirmados,
+    
+    coalesce(qtdd_total,0) qtdd_total,
+    coalesce(qtdd_bpe,0) qtdd_bpe,
+    coalesce(qtdd_picovtas,0) qtdd_picovtas,
+    coalesce(qtdd_bof_var,0) qtdd_bof_var,
+    coalesce(qtdd_pico_gmv,0) qtdd_bof_var,
+    coalesce(qtdd_pnr_pre_shipped,0) qtdd_pnr_pre_shipped,
+    coalesce(qtdd_pnr,0) qtdd_pnr,
+    coalesce(qtdd_can,0) qtdd_can,
+    coalesce(qtdd_skipped,0) qtdd_skipped,
+    coalesce(qtdd_seller_cx,0) qtdd_seller_cx,
+    coalesce(qtdd_ref_can_cx,0) qtdd_ref_can_cx,
+    coalesce(qtdd_micro_bof,0) qtdd_micro_bof,
+    coalesce(qtdd_marca_bof,0) qtdd_marca_bof,
+    coalesce(amenazas_de_bof,0) amenazas_de_bof,
+
+    coalesce(round(cast(inabs_total as numeric) / nullif(cast(qtdd_total as numeric),0),2),0) efic_total,
+    coalesce(round(cast(inabs_bpe as numeric) / nullif(cast(qtdd_bpe as numeric),0),2),0) efic_bpe,
+    coalesce(round(cast(inabs_picovtas as numeric) / nullif(cast(qtdd_picovtas as numeric),0),2),0) efic_picovtas,
+    coalesce(round(cast(inabs_bof_var as numeric) / nullif(cast(qtdd_bof_var as numeric),0),2),0) efic_bof_var,
+    coalesce(round(cast(inabs_pico_gmv as numeric) / nullif(cast(qtdd_pico_gmv as numeric),0),2),0) efic_bof_var,
+    coalesce(round(cast(inabs_pnr_pre_shipped as numeric) / nullif(cast(qtdd_pnr_pre_shipped as numeric),0),2),0) efic_pnr_pre_shipped,
+    coalesce(round(cast(inabs_pnr as numeric) / nullif(cast(qtdd_pnr as numeric),0),2),0) efic_pnr,
+    coalesce(round(cast(inabs_can as numeric) / nullif(cast(qtdd_can as numeric),0),2),0) efic_can,
+    coalesce(round(cast(inabs_skipped as numeric) / nullif(cast(qtdd_skipped as numeric),0),2),0) efic_skipped,
+    coalesce(round(cast(inabs_seller_cx as numeric) / nullif(cast(qtdd_seller_cx as numeric),0),2),0) efic_seller_cx,
+    coalesce(round(cast(inabs_ref_can_cx as numeric) / nullif(cast(qtdd_ref_can_cx as numeric),0),2),0) efic_ref_can_cx,
+    coalesce(round(cast(inabs_micro_bof as numeric) / nullif(cast(qtdd_micro_bof as numeric),0),2),0) efic_micro_bof,
+    coalesce(round(cast(inabs_marca_bof as numeric) / nullif(cast(qtdd_marca_bof as numeric),0),2),0) efic_marca_bof,
+    coalesce(round(cast(bofs_confirmados as numeric) / nullif(cast(amenazas_de_bof as numeric),0),2),0) efic_marcas_de_bof
+    
+  from `meli-bi-data.SBOX_PF_MKT.casos_efic_dia`;
+
+
+-- medias móveis de 30 dias
+select
+  calendar_date,
+
+  inabs_total,
+  inabs_bpe,
+  inabs_picovtas,
+  inabs_bof_var,
+  inabs_pico_gmv,
+  inabs_pnr_pre_shipped,
+  inabs_pnr,
+  inabs_can,
+  inabs_skipped,
+  inabs_seller_cx,
+  inabs_ref_can_cx,
+  inabs_micro_bof,
+  inabs_marca_bof,
+  bofs_confirmados,
+  round(avg(inabs_total) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_i_total,
+  round(avg(inabs_bpe) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_i_bpe,
+  round(avg(inabs_picovtas) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_i_picovtas,
+  round(avg(inabs_bof_var) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_i_bof_var,
+  round(avg(inabs_pico_gmv) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_i_bof_var,
+  round(avg(inabs_pnr_pre_shipped) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_i_pnr_pre_shipped,
+  round(avg(inabs_pnr) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_i_pnr,
+  round(avg(inabs_can) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_i_can,
+  round(avg(inabs_skipped) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_i_skipped,
+  round(avg(inabs_seller_cx) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_i_seller_cx,
+  round(avg(inabs_ref_can_cx) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_i_ref_can_cx,
+  round(avg(inabs_micro_bof) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_i_micro_bof,
+  round(avg(inabs_marca_bof) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_i_marca_bof,
+  round(avg(bofs_confirmados) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_i_bofs_confirmados,
+
+  qtdd_total,
+  qtdd_bpe,
+  qtdd_picovtas,
+  qtdd_bof_var,
+  qtdd_pico_gmv,
+  qtdd_pnr_pre_shipped,
+  qtdd_pnr,
+  qtdd_can,
+  qtdd_skipped,
+  qtdd_seller_cx,
+  qtdd_ref_can_cx,
+  qtdd_micro_bof,
+  qtdd_marca_bof,
+  amenazas_de_bof,
+  round(avg(qtdd_total) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_q_total,
+  round(avg(qtdd_bpe) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_q_bpe,
+  round(avg(qtdd_picovtas) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_q_picovtas,
+  round(avg(qtdd_bof_var) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_q_bof_var,
+  round(avg(qtdd_pico_gmv) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_q_pico_gmv,
+  round(avg(qtdd_pnr_pre_shipped) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_q_pnr_pre_shipped,
+  round(avg(qtdd_pnr) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_q_pnr,
+  round(avg(qtdd_can) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_q_can,
+  round(avg(qtdd_skipped) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_q_skipped,
+  round(avg(qtdd_seller_cx) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_q_seller_cx,
+  round(avg(qtdd_ref_can_cx) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_q_ref_can_cx,
+  round(avg(qtdd_micro_bof) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_q_micro_bof,
+  round(avg(qtdd_marca_bof) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_q_marca_bof,
+  round(avg(amenazas_de_bof) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_q_amenazas_de_bof,
+
+  efic_total,
+  efic_bpe,
+  efic_picovtas,
+  efic_bof_var,
+  efic_pico_gmv,
+  efic_pnr_pre_shipped,
+  efic_pnr,
+  efic_can,
+  efic_skipped,
+  efic_seller_cx,
+  efic_ref_can_cx,
+  efic_micro_bof,
+  efic_marca_bof,
+  efic_marcas_de_bof,
+  round(avg(efic_total) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_ef_total,
+  round(avg(efic_bpe) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_ef_bpe,
+  round(avg(efic_picovtas) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_ef_picovtas,
+  round(avg(efic_bof_var) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_ef_bof_var,
+  round(avg(efic_pico_gmv) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_ef_bof_var,
+  round(avg(efic_pnr_pre_shipped) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_ef_pnr_pre_shipped,
+  round(avg(efic_pnr) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_ef_pnr,
+  round(avg(efic_can) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_ef_can,
+  round(avg(efic_skipped) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_ef_skipped,
+  round(avg(efic_seller_cx) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_ef_seller_cx,
+  round(avg(efic_ref_can_cx) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_ef_ref_can_cx,
+  round(avg(efic_micro_bof) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_ef_micro_bof,
+  round(avg(efic_marca_bof) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_ef_marca_bof,
+  round(avg(efic_marcas_de_bof) over (order by calendar_date rows between 29 preceding and 0 following),2) mm30d_ef_marcas_de_bof
+
+FROM `meli-bi-data.SBOX_PF_MKT.base`;
+
+
+
+

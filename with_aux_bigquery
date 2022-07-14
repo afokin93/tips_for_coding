@@ -1,0 +1,476 @@
+-- lista inicial
+drop table if exists `meli-bi-data.SBOX_PF_MKT.tabla_aux_BS`;
+CREATE TABLE `meli-bi-data.SBOX_PF_MKT.tabla_aux_BS`
+OPTIONS(
+  expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+) AS
+SELECT * FROM(
+select 
+a.cust_id,
+sum(case when tim_day_winning_date > current_date - 7 then gmv_usd else 0 end) AS GMV
+from `meli-bi-data.SBOX_PF_MKT.universo_BS` a
+left join `meli-bi-data.SBOX_PF_MKT.fraud_main_mirror_metricas` b
+on a.cust_id = b.cus_cust_id_sel
+group by 1 ) 
+WHERE GMV > 50000;
+
+----- variacion diaria -----
+drop table if exists `meli-bi-data.SBOX_PF_MKT.diaria_aux`;
+CREATE TABLE `meli-bi-data.SBOX_PF_MKT.diaria_aux`
+OPTIONS(
+  expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+) AS
+  select distinct
+    cus_cust_id_sel as cust_id,
+    --tim_day_winning_date fecha,
+    sum(case when tim_day_winning_date = current_date - 15 then gmv_usd else 0 end) as gmv_15d,
+    sum(case when tim_day_winning_date = current_date - 14 then gmv_usd else 0 end) as gmv_14d,
+    sum(case when tim_day_winning_date = current_date - 13 then gmv_usd else 0 end) as gmv_13d,
+    sum(case when tim_day_winning_date = current_date - 12 then gmv_usd else 0 end) as gmv_12d,
+    sum(case when tim_day_winning_date = current_date - 11 then gmv_usd else 0 end) as gmv_11d,
+    sum(case when tim_day_winning_date = current_date - 10 then gmv_usd else 0 end) as gmv_10d,
+    sum(case when tim_day_winning_date = current_date - 9 then gmv_usd else 0 end) as gmv_9d,
+    sum(case when tim_day_winning_date = current_date - 8 then gmv_usd else 0 end) as gmv_8d,
+    sum(case when tim_day_winning_date = current_date - 7 then gmv_usd else 0 end) as gmv_7d,
+    sum(case when tim_day_winning_date = current_date - 6 then gmv_usd else 0 end) as gmv_6d,
+    sum(case when tim_day_winning_date = current_date - 5 then gmv_usd else 0 end) as gmv_5d,
+    sum(case when tim_day_winning_date = current_date - 4 then gmv_usd else 0 end) as gmv_4d,
+    sum(case when tim_day_winning_date = current_date - 3 then gmv_usd else 0 end) as gmv_3d
+  from `meli-bi-data.SBOX_PF_MKT.fraud_main_mirror_metricas` 
+  where 1 = 1
+ -- and tim_day_winning_date between '2022-04-25' and '2022-05-13'
+    and cus_cust_id_sel in (select cust_id from `meli-bi-data.SBOX_PF_MKT.tabla_aux_BS` )
+  group by 1
+  order by 2 desc;
+
+
+
+drop table if exists `meli-bi-data.SBOX_PF_MKT.coef_var_diario`;
+CREATE TABLE `meli-bi-data.SBOX_PF_MKT.coef_var_diario`
+OPTIONS(
+  expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+) AS
+with aux as( 
+select
+*,
+    sum(gmv_15d+gmv_14d+gmv_13d+gmv_12d+gmv_11d+gmv_10d+gmv_9d+gmv_8d+gmv_7d+gmv_6d+gmv_5d+gmv_4d+gmv_3d)/13 as media
+  from `meli-bi-data.SBOX_PF_MKT.diaria_aux`
+ group by 1,2,3,4,5,6,7,8,9,10,11,12,13,14),
+
+ aux1 as(
+ select cust_id,
+ round(media,2) as media,
+ round(power((gmv_15d - media),2),2) as var15,
+ round(power((gmv_14d - media),2),2) as var14,
+ round(power((gmv_13d - media),2),2) as var13,
+ round(power((gmv_12d - media),2),2) as var12,
+ round(power((gmv_11d - media),2),2) as var11,
+ round(power((gmv_10d - media),2),2) as var10,
+ round(power((gmv_9d - media),2),2) as var9,
+ round(power((gmv_8d - media),2),2) as var8,
+ round(power((gmv_7d - media),2),2) as var7,
+ round(power((gmv_6d - media),2),2) as var6,
+ round(power((gmv_5d - media),2),2) as var5,
+ round(power((gmv_4d - media),2),2) as var4,
+ round(power((gmv_3d - media),2),2) as var3
+ from aux),
+
+ aux2 as (
+ select
+ cust_id,
+ SQRT(safe_divide(sum(var3+var4+var5+var6+var7+var8+var9+var10+var11+var11+var12+var13+var14+var15),13)) as std
+ from aux1
+ group by 1)
+
+ select a.cust_id, safe_divide(a.std,b.media) as coef_diario
+ from aux2 a 
+ left join aux1 b
+ on a.cust_id = b.cust_id
+ order by 2 asc;
+ 
+
+------ variacion semanal ------
+
+drop table if exists `meli-bi-data.SBOX_PF_MKT.semanal_aux`;
+CREATE TABLE `meli-bi-data.SBOX_PF_MKT.semanal_aux`
+OPTIONS(
+  expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+) AS
+select distinct
+    cus_cust_id_sel as cust_id,
+    
+  sum(case when tim_day_winning_date between current_date - 7 
+  and current_date then gmv_usd else 0 end) as gmv_s1,
+  
+  sum(case when tim_day_winning_date between  current_date - 14
+  and current_date - 8  then gmv_usd else 0 end) as gmv_s2,
+    
+  sum(case when  tim_day_winning_date between  current_date - 21
+  and current_date - 15   then gmv_usd else 0 end) as gmv_s3,
+
+  sum(case when tim_day_winning_date between  current_date - 28
+  and current_date - 22   then gmv_usd else 0 end) as gmv_s4,
+
+  sum(case when tim_day_winning_date between  current_date - 35
+  and current_date - 29   then gmv_usd else 0 end) as gmv_s5,
+
+  sum(case when tim_day_winning_date between  current_date - 42
+  and current_date - 36   then gmv_usd else 0 end) as gmv_s6,
+
+  sum(case when tim_day_winning_date between  current_date - 49
+  and current_date - 43   then gmv_usd else 0 end) as gmv_s7,
+
+  sum(case when tim_day_winning_date between  current_date - 56
+  and current_date - 50   then gmv_usd else 0 end) as gmv_s8
+
+  from `meli-bi-data.SBOX_PF_MKT.fraud_main_mirror_metricas` 
+  where 1 = 1
+  --and tim_day_winning_date between '2022-04-25' and '2022-05-13'
+  and cus_cust_id_sel in (select cust_id from `meli-bi-data.SBOX_PF_MKT.tabla_aux_BS` )
+  group by 1
+  order by 2 desc;
+
+
+drop table if exists `meli-bi-data.SBOX_PF_MKT.coef_var_semanal`;
+CREATE TABLE `meli-bi-data.SBOX_PF_MKT.coef_var_semanal`
+OPTIONS(
+  expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+) AS
+with aux as( 
+select
+*,
+    sum(gmv_s1+gmv_s2+gmv_s3+gmv_s4+gmv_s5+gmv_s6+gmv_s7+gmv_s8)/8 as media
+  from `meli-bi-data.SBOX_PF_MKT.semanal_aux`
+ group by 1,2,3,4,5,6,7,8,9),
+
+ aux1 as(
+ select cust_id,
+ round(media,2) as media,
+ round(power((gmv_s8- media),2),2) as var8,
+ round(power((gmv_s7- media),2),2) as var7,
+ round(power((gmv_s6- media),2),2) as var6,
+ round(power((gmv_s5- media),2),2) as var5,
+ round(power((gmv_s4- media),2),2) as var4,
+ round(power((gmv_s3- media),2),2) as var3,
+ round(power((gmv_s2- media),2),2) as var2,
+ round(power((gmv_s1- media),2),2) as var1
+ from aux),
+
+ aux2 as (
+ select
+ cust_id,
+ SQRT(safe_divide(sum(var1+var2+var3+var4+var5+var6+var7+var8),8)) as std
+ from aux1
+ group by 1)
+
+ select a.cust_id, safe_divide(a.std,b.media) as coef_semanal
+ from aux2 a 
+ left join aux1 b
+ on a.cust_id = b.cust_id
+ order by 2 asc;
+
+
+---- variacion mensual ------
+drop table if exists `meli-bi-data.SBOX_PF_MKT.mensual_aux`;
+CREATE TABLE `meli-bi-data.SBOX_PF_MKT.mensual_aux`
+OPTIONS(
+  expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+) AS
+select distinct
+    cus_cust_id_sel as cust_id,
+    
+  sum(case when tim_day_winning_date between current_date - 30 
+  and current_date then gmv_usd else 0 end) as gmv_m1,
+  
+  sum(case when tim_day_winning_date between  current_date - 60
+  and current_date - 31  then gmv_usd else 0 end) as gmv_m2,
+    
+  sum(case when  tim_day_winning_date between  current_date - 90
+  and current_date - 61  then gmv_usd else 0 end) as gmv_m3
+
+  from `meli-bi-data.SBOX_PF_MKT.fraud_main_mirror_metricas` 
+  where 1 = 1
+  --and tim_day_winning_date between '2022-04-25' and '2022-05-13'
+  and cus_cust_id_sel in (select cust_id from `meli-bi-data.SBOX_PF_MKT.universo_BS` )
+  group by 1
+  order by 2 desc;
+
+
+-- coeficiente variação mensual
+drop table if exists `meli-bi-data.SBOX_PF_MKT.coef_var_mensual`;
+CREATE TABLE `meli-bi-data.SBOX_PF_MKT.coef_var_mensual`
+OPTIONS(
+  expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+) AS
+with aux as( 
+select
+*,
+    sum(gmv_m1+gmv_m2+gmv_m3)/3 as media
+  from `meli-bi-data.SBOX_PF_MKT.mensual_aux`
+ group by 1,2,3,4),
+
+ aux1 as(
+ select cust_id,
+ round(media,2) as media,
+ round(power((gmv_m1- media),2),2) as var3,
+ round(power((gmv_m2- media),2),2) as var2,
+ round(power((gmv_m3- media),2),2) as var1
+ from aux),
+
+ aux2 as (
+ select
+ cust_id,
+ SQRT(safe_divide(sum(var1+var2+var3),3)) as std
+ from aux1
+ group by 1)
+
+ select a.cust_id, safe_divide(a.std,b.media) as coef_mensual
+ from aux2 a 
+ left join aux1 b
+ on a.cust_id = b.cust_id
+ order by 2 asc;
+
+
+
+-- junção de informações
+drop table if exists `meli-bi-data.SBOX_PF_MKT.infos_gmv`;
+CREATE TABLE `meli-bi-data.SBOX_PF_MKT.infos_gmv`
+OPTIONS(
+  expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+) AS
+ select
+ a.cust_id,
+ a.coef_diario,
+ b.coef_semanal,
+ c.coef_mensual
+ from `meli-bi-data.SBOX_PF_MKT.coef_var_diario` a 
+ left join `meli-bi-data.SBOX_PF_MKT.coef_var_semanal` b
+ on a.cust_id = b.cust_id
+ left join `meli-bi-data.SBOX_PF_MKT.coef_var_mensual` c
+ on a.cust_id = c.cust_id;
+
+
+
+------------- ADELANTOS -----------
+
+-- adelantos diarios
+drop table if exists `meli-bi-data.SBOX_PF_MKT.adto_diario`;
+CREATE TABLE `meli-bi-data.SBOX_PF_MKT.adto_diario`
+OPTIONS(
+  expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+) AS
+select distinct
+  a.cust_id,
+  sum(case when cast(b.creation_date as date) = current_date - 15 then b.net_amount_inusd else 0 end) as monto_15d,
+  sum(case when cast(b.creation_date as date) = current_date - 14 then b.net_amount_inusd else 0 end) as monto_14d,
+  sum(case when cast(b.creation_date as date) = current_date - 13 then b.net_amount_inusd else 0 end) as monto_13d,
+  sum(case when cast(b.creation_date as date) = current_date - 12 then b.net_amount_inusd else 0 end) as monto_12d,
+  sum(case when cast(b.creation_date as date) = current_date - 11 then b.net_amount_inusd else 0 end) as monto_11d,
+  sum(case when cast(b.creation_date as date) = current_date - 10 then b.net_amount_inusd else 0 end) as monto_10d,
+  sum(case when cast(b.creation_date as date) = current_date - 9 then b.net_amount_inusd else 0 end) as monto_9d,
+  sum(case when cast(b.creation_date as date) = current_date - 8 then b.net_amount_inusd else 0 end) as monto_8d,
+  sum(case when cast(b.creation_date as date) = current_date - 7 then b.net_amount_inusd else 0 end) as monto_7d,
+  sum(case when cast(b.creation_date as date) = current_date - 6 then b.net_amount_inusd else 0 end) as monto_6d,
+  sum(case when cast(b.creation_date as date) = current_date - 5 then b.net_amount_inusd else 0 end) as monto_5d,
+  sum(case when cast(b.creation_date as date) = current_date - 4 then b.net_amount_inusd else 0 end) as monto_4d,
+  sum(case when cast(b.creation_date as date) = current_date - 3 then b.net_amount_inusd else 0 end) as monto_3d
+  from meli-bi-data.SBOX_PF_MKT.tabla_aux_BS a
+  left join meli-bi-data.WHOWNER.BT_MP_MIA b
+    on a.cust_id = b.cus_cust_id
+  where 1 = 1
+  group by 1
+  order by 2 desc;
+
+
+-- coeficiente de variação diária adelantos
+drop table if exists `meli-bi-data.SBOX_PF_MKT.coef_var_diario_adto`;
+CREATE TABLE `meli-bi-data.SBOX_PF_MKT.coef_var_diario_adto`
+OPTIONS(
+  expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+) AS
+  with aux as( 
+  select
+    *,
+    sum(monto_15d+monto_14d+monto_13d+monto_12d+monto_11d+monto_10d+monto_9d+monto_8d+monto_7d+monto_6d+monto_5d+monto_4d+monto_3d)/13 as media
+  from `meli-bi-data.SBOX_PF_MKT.adto_diario`
+  group by 1,2,3,4,5,6,7,8,9,10,11,12,13,14),
+
+  aux1 as(
+  select
+    cust_id,
+    round(media,2) as media,
+    round(power((monto_15d - media),2),2) as var15,
+    round(power((monto_14d - media),2),2) as var14,
+    round(power((monto_13d - media),2),2) as var13,
+    round(power((monto_12d - media),2),2) as var12,
+    round(power((monto_11d - media),2),2) as var11,
+    round(power((monto_10d - media),2),2) as var10,
+    round(power((monto_9d - media),2),2) as var9,
+    round(power((monto_8d - media),2),2) as var8,
+    round(power((monto_7d - media),2),2) as var7,
+    round(power((monto_6d - media),2),2) as var6,
+    round(power((monto_5d - media),2),2) as var5,
+    round(power((monto_4d - media),2),2) as var4,
+    round(power((monto_3d - media),2),2) as var3
+  from aux),
+
+  aux2 as (
+  select
+    cust_id,
+    SQRT(safe_divide(sum(var3+var4+var5+var6+var7+var8+var9+var10+var11+var11+var12+var13+var14+var15),13)) as std
+  from aux1
+  group by 1)
+
+  select
+    a.cust_id,
+    safe_divide(a.std,b.media) as coef_diario
+  from aux2 a 
+  left join aux1 b
+    on a.cust_id = b.cust_id
+  order by 2 asc;
+ 
+
+-- adelantos semanais
+drop table if exists `meli-bi-data.SBOX_PF_MKT.adto_semanal`;
+CREATE TABLE `meli-bi-data.SBOX_PF_MKT.adto_semanal`
+OPTIONS(
+  expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+) AS
+  select distinct
+    a.cust_id,
+    sum(case when cast(b.creation_date as date) between current_date - 7 and current_date then b.net_amount_inusd else 0 end) as monto_s1,
+    sum(case when cast(b.creation_date as date) between current_date - 14 and current_date - 8 then b.net_amount_inusd else 0 end) as monto_s2,    
+    sum(case when cast(b.creation_date as date) between current_date - 21 and current_date - 15 then b.net_amount_inusd else 0 end) as monto_s3,
+    sum(case when cast(b.creation_date as date) between current_date - 28 and current_date - 22 then b.net_amount_inusd else 0 end) as monto_s4,
+    sum(case when cast(b.creation_date as date) between current_date - 35 and current_date - 29 then b.net_amount_inusd else 0 end) as monto_s5,
+    sum(case when cast(b.creation_date as date) between current_date - 42 and current_date - 36 then b.net_amount_inusd else 0 end) as monto_s6,
+    sum(case when cast(b.creation_date as date) between current_date - 49 and current_date - 43 then b.net_amount_inusd else 0 end) as monto_s7,
+    sum(case when cast(b.creation_date as date) between current_date - 56 and current_date - 50 then b.net_amount_inusd else 0 end) as monto_s8
+  from meli-bi-data.SBOX_PF_MKT.tabla_aux_BS a
+  left join meli-bi-data.WHOWNER.BT_MP_MIA b
+    on a.cust_id = b.cus_cust_id
+  where 1 = 1
+  group by 1;
+
+
+-- coeficiente de variação semanal adelantos
+drop table if exists `meli-bi-data.SBOX_PF_MKT.coef_var_semanal_adto`;
+CREATE TABLE `meli-bi-data.SBOX_PF_MKT.coef_var_semanal_adto`
+OPTIONS(
+  expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+) AS
+  with aux as( 
+  select
+    *,
+    sum(monto_s1+monto_s2+monto_s3+monto_s4+monto_s5+monto_s6+monto_s7+monto_s8)/8 as media
+  from `meli-bi-data.SBOX_PF_MKT.adto_semanal`
+  group by 1,2,3,4,5,6,7,8,9),
+
+  aux1 as(
+  select cust_id,
+    round(media,2) as media,
+    round(power((monto_s8 - media),2),2) as var8,
+    round(power((monto_s7 - media),2),2) as var7,
+    round(power((monto_s6 - media),2),2) as var6,
+    round(power((monto_s5 - media),2),2) as var5,
+    round(power((monto_s4 - media),2),2) as var4,
+    round(power((monto_s3 - media),2),2) as var3,
+    round(power((monto_s2 - media),2),2) as var2,
+    round(power((monto_s1 - media),2),2) as var1
+  from aux),
+
+  aux2 as (
+  select
+    cust_id,
+    SQRT(safe_divide(sum(var1+var2+var3+var4+var5+var6+var7+var8),8)) as std
+  from aux1
+  group by 1)
+
+  select
+    a.cust_id,
+    safe_divide(a.std,b.media) as coef_semanal
+  from aux2 a 
+  left join aux1 b
+    on a.cust_id = b.cust_id
+  order by 2 asc;
+
+
+-- adelantos mensais
+drop table if exists `meli-bi-data.SBOX_PF_MKT.adto_mensal`;
+CREATE TABLE `meli-bi-data.SBOX_PF_MKT.adto_mensal`
+OPTIONS(
+  expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+) AS
+select distinct
+    a.cust_id,
+    sum(case when cast(b.creation_date as date) between current_date - 30 and current_date then b.net_amount_inusd else 0 end) as monto_m1,    
+    sum(case when cast(b.creation_date as date) between current_date - 60 and current_date - 31 then b.net_amount_inusd else 0 end) as monto_m2,
+    sum(case when cast(b.creation_date as date) between current_date - 90 and current_date - 61 then b.net_amount_inusd else 0 end) as monto_m3,
+  from meli-bi-data.SBOX_PF_MKT.tabla_aux_BS a
+  left join meli-bi-data.WHOWNER.BT_MP_MIA b
+    on a.cust_id = b.cus_cust_id
+  where 1 = 1
+  group by 1;
+
+
+-- coeficiente de variação mensual adelantos
+drop table if exists `meli-bi-data.SBOX_PF_MKT.coef_var_mensal_adto`;
+CREATE TABLE `meli-bi-data.SBOX_PF_MKT.coef_var_mensal_adto`
+OPTIONS(
+  expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+) AS
+with aux as( 
+select
+*,
+    sum(monto_m1+monto_m2+monto_m3)/3 as media
+  from `meli-bi-data.SBOX_PF_MKT.adto_mensal`
+ group by 1,2,3,4),
+
+ aux1 as(
+ select cust_id,
+ round(media,2) as media,
+ round(power((monto_m1 - media),2),2) as var3,
+ round(power((monto_m2 - media),2),2) as var2,
+ round(power((monto_m3 - media),2),2) as var1
+ from aux),
+
+ aux2 as (
+ select
+ cust_id,
+ SQRT(safe_divide(sum(var1+var2+var3),3)) as std
+ from aux1
+ group by 1)
+
+ select a.cust_id, safe_divide(a.std,b.media) as coef_mensual
+ from aux2 a 
+ left join aux1 b
+ on a.cust_id = b.cust_id
+ order by 2 asc;
+
+
+-- juntando informações gmv + adto
+select
+ a.cust_id,
+ trunc(cast(a.coef_diario as numeric),2) coef_diario_gmv,
+ trunc(cast(b.coef_semanal as numeric),2) coef_semanal_gmv,
+ trunc(cast(c.coef_mensual as numeric),2) coef_mensual_gmv,
+ trunc(cast(d.coef_diario as numeric),2) coef_diario_adto,
+ trunc(cast(e.coef_semanal as numeric),2) coef_semanal_adto,
+ trunc(cast(f.coef_mensual as numeric),2) coef_mensual_adto,
+ from `meli-bi-data.SBOX_PF_MKT.coef_var_diario` a 
+ left join `meli-bi-data.SBOX_PF_MKT.coef_var_semanal` b
+ on a.cust_id = b.cust_id
+ left join `meli-bi-data.SBOX_PF_MKT.coef_var_mensual` c
+ on a.cust_id = c.cust_id
+left join `meli-bi-data.SBOX_PF_MKT.coef_var_diario_adto` d
+  on a.cust_id = d.cust_id
+left join `meli-bi-data.SBOX_PF_MKT.coef_var_semanal_adto` e
+  on a.cust_id = e.cust_id
+left join `meli-bi-data.SBOX_PF_MKT.coef_var_mensal_adto` f
+  on a.cust_id = f.cust_id
+where (d.coef_diario is not null or e.coef_semanal is not null or f.coef_mensual is not null)
+order by 4 desc;
+
+
+
+

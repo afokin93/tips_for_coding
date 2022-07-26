@@ -1,0 +1,6 @@
+
+-- cálculo de dias + diferença
+diffInDays(
+	toTimestamp(order_date_closed, "yyyy-MM-dd HH:mm:ss"),
+	toTimestamp(oldest_order_date_closed, "yyyy-MM-dd HH:mm:ss")
+) == 0
